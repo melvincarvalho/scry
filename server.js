@@ -149,6 +149,8 @@ export async function createSite({
       grantCredits,
       admins,
       accountsUi: true, // the register/login form instead of pod-bearer paste
+      brand: 'scry',
+      tagline: 'prediction markets on the news',
       baseUrl: origin,
     },
     log: {
