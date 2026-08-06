@@ -4,6 +4,9 @@
 //   node tools/seed.js [http://localhost:3490]
 
 const base = (process.argv[2] || 'http://localhost:3490').replace(/\/$/, '');
+// When seeding over loopback behind a proxy, the engine's CSRF guard checks
+// the PUBLIC origin — pass it as the second argument.
+const publicOrigin = (process.argv[3] || base).replace(/\/$/, '');
 const PASS = 'scry-newsdesk-2026';
 const days = (n) => new Date(Date.now() + n * 864e5).toISOString();
 
@@ -44,7 +47,7 @@ const post = (p, body, extra = {}) => fetch(base + p, {
   method: 'POST',
   // origin header: the engine's CSRF guard wants a same-origin signal on
   // any cookie-authenticated write.
-  headers: { 'content-type': 'application/json', origin: base, ...extra },
+  headers: { 'content-type': 'application/json', origin: publicOrigin, ...extra },
   body: JSON.stringify(body),
 }).then(async (r) => ({ status: r.status, headers: r.headers, body: await r.json().catch(() => ({})) }));
 
