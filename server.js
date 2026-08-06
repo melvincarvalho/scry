@@ -34,6 +34,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{1,30}$/;
 const TOKEN_TTL_MS = 30 * 24 * 3600 * 1000;
 const REGISTER_PER_HOUR = Number(process.env.SCRY_REGISTER_PER_HOUR || 10);
+const LOGIN_PER_15MIN = Number(process.env.SCRY_LOGIN_PER_15MIN || 30);
 const b64u = (b) => Buffer.from(b).toString('base64url');
 
 export async function createSite({
@@ -42,6 +43,10 @@ export async function createSite({
   admins = [],
   grantCredits = 1000,
   trustProxy = process.env.TRUST_PROXY === '1',
+  // The engine's own per-IP token bucket. Exposed because a busy node (or a
+  // test suite) legitimately needs to raise it.
+  rateCapacity = Number(process.env.SCRY_RATE_CAPACITY || 0) || undefined,
+  rateRefillPerSec = Number(process.env.SCRY_RATE_REFILL || 0) || undefined,
 } = {}) {
   fs.mkdirSync(dataDir, { recursive: true });
 
@@ -53,16 +58,30 @@ export async function createSite({
     secret = crypto.randomBytes(32);
     fs.writeFileSync(secretFile, secret, { mode: 0o600 });
   }
-  let accounts;
-  try { accounts = JSON.parse(fs.readFileSync(accountsFile, 'utf8')); } catch { accounts = {}; }
+  // Null-prototype: with a plain object, accounts['constructor'] is truthy,
+  // which made /u/constructor serve a profile for an account that does not
+  // exist and permanently 409'd anyone registering that name.
+  let accounts = Object.create(null);
+  try { Object.assign(accounts, JSON.parse(fs.readFileSync(accountsFile, 'utf8'))); } catch { /* first run */ }
+  const hasAccount = (name) => Object.prototype.hasOwnProperty.call(accounts, name);
   const saveAccounts = () => fs.writeFileSync(accountsFile, JSON.stringify(accounts, null, 2));
-  const hashPassword = (password, salt) => b64u(crypto.scryptSync(password, salt, 32));
+  // ASYNC scrypt: scryptSync blocks the single thread for ~25ms, so a burst
+  // of logins would stall every trade on the node. The engine's atomicity
+  // relies on synchronous ledger mutation — but auth must never be part of
+  // that critical section.
+  const hashPassword = (password, salt) => new Promise((resolve, reject) => {
+    crypto.scrypt(password, salt, 32, (err, key) => (err ? reject(err) : resolve(b64u(key))));
+  });
 
   let origin = publicUrl ? String(publicUrl).replace(/\/$/, '') : null;
   const agentUri = (name) => `${origin}/u/${name}#me`;
 
-  function mintToken(agent) {
-    const payload = b64u(JSON.stringify({ a: agent, exp: Date.now() + TOKEN_TTL_MS }));
+  // Tokens carry the account's EPOCH so a compromised bearer can be revoked
+  // without rotating the node secret (which would log everyone out).
+  // Bumping accounts[name].epoch invalidates every token issued before it.
+  function mintToken(agent, name) {
+    const epoch = (hasAccount(name) && accounts[name].epoch) || 0;
+    const payload = b64u(JSON.stringify({ a: agent, n: name, e: epoch, exp: Date.now() + TOKEN_TTL_MS }));
     const mac = b64u(crypto.createHmac('sha256', secret).update(payload).digest());
     return `v1.${payload}.${mac}`;
   }
@@ -73,23 +92,42 @@ export async function createSite({
     const a = Buffer.from(mac); const b = Buffer.from(m[2]);
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
     try {
-      const { a: agent, exp } = JSON.parse(Buffer.from(m[1], 'base64url').toString());
-      return exp > Date.now() ? agent : null;
+      const { a: agent, n: name, e: epoch, exp } = JSON.parse(Buffer.from(m[1], 'base64url').toString());
+      if (!(exp > Date.now())) return null;
+      // Legacy tokens (no name) predate epochs; accept until they expire.
+      if (name && (!hasAccount(name) || ((accounts[name].epoch || 0) !== (epoch || 0)))) return null;
+      return agent;
     } catch { return null; }
   }
 
-  const regHits = new Map();
-  function registerAllowed(req) {
-    const ip = trustProxy
-      ? String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?').split(',')[0].trim()
-      : String(req.socket.remoteAddress || '?');
-    const now = Date.now();
-    const hits = (regHits.get(ip) || []).filter((t) => now - t < 3600_000);
-    if (hits.length >= REGISTER_PER_HOUR) return false;
-    hits.push(now);
-    regHits.set(ip, hits);
-    return true;
+  const clientIp = (req) => (trustProxy
+    ? String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?').split(',')[0].trim()
+    : String(req.socket.remoteAddress || '?'));
+
+  /** Sliding-window limiter keyed by anything; bounded so it cannot grow
+   *  without limit under a rotating-key flood. */
+  function makeLimiter(cap, windowMs, maxKeys = 20_000) {
+    const hits = new Map();
+    return (key) => {
+      const now = Date.now();
+      const list = (hits.get(key) || []).filter((t) => now - t < windowMs);
+      if (list.length >= cap) { hits.set(key, list); return false; }
+      list.push(now);
+      hits.set(key, list);
+      if (hits.size > maxKeys) {
+        for (const [k, v] of hits) { if (!v.length || now - v[v.length - 1] > windowMs) hits.delete(k); }
+        if (hits.size > maxKeys) hits.clear();
+      }
+      return true;
+    };
   }
+  const registerLimit = makeLimiter(REGISTER_PER_HOUR, 3600_000);
+  // Password guessing was completely unthrottled: 30 tries/15min per IP AND
+  // per account, so neither a single-account grind nor a spray across many
+  // accounts from one address is free.
+  const loginIpLimit = makeLimiter(LOGIN_PER_15MIN, 900_000);
+  const loginUserLimit = makeLimiter(LOGIN_PER_15MIN, 900_000);
+  const registerAllowed = (req) => registerLimit(clientIp(req));
 
   // ---- the host ----------------------------------------------------------
   const fastify = Fastify({ logger: false, trustProxy, forceCloseConnections: true });
@@ -103,28 +141,59 @@ export async function createSite({
     const password = String(body.password || '');
     if (!NAME_RE.test(name)) return reply.code(400).send({ error: 'username: 2–31 chars of a-z 0-9 . _ -' });
     if (password.length < 8) return reply.code(400).send({ error: 'password: at least 8 characters' });
-    if (accounts[name]) return reply.code(409).send({ error: 'username already taken' });
+    if (hasAccount(name)) return reply.code(409).send({ error: 'username already taken' });
     const salt = b64u(crypto.randomBytes(16));
-    accounts[name] = { salt, hash: hashPassword(password, salt), created: new Date().toISOString() };
+    accounts[name] = {
+      salt, hash: await hashPassword(password, salt), created: new Date().toISOString(), epoch: 0,
+    };
     saveAccounts();
     const agent = agentUri(name);
-    return reply.code(201).send({ agent, token: mintToken(agent) });
+    return reply.code(201).send({ agent, token: mintToken(agent, name) });
   });
 
+  // A dummy salt so a MISSING account costs the same scrypt work as a real
+  // one: returning fast for unknown users is a username-enumeration oracle.
+  const DUMMY_SALT = b64u(crypto.randomBytes(16));
   fastify.post('/api/login', async (request, reply) => {
     const body = request.body || {};
     const name = String(body.username || '').toLowerCase();
-    const acct = accounts[name];
-    if (!acct || hashPassword(String(body.password || ''), acct.salt) !== acct.hash) {
-      return reply.code(401).send({ error: 'wrong username or password' });
-    }
+    const tooMany = !loginIpLimit(clientIp(request.raw)) || !loginUserLimit(name);
+    if (tooMany) return reply.code(429).send({ error: 'too many sign-in attempts — wait a few minutes' });
+    const acct = hasAccount(name) ? accounts[name] : null;
+    const attempt = await hashPassword(String(body.password || ''), acct ? acct.salt : DUMMY_SALT);
+    const ok = !!acct && crypto.timingSafeEqual(Buffer.from(attempt), Buffer.from(acct.hash));
+    if (!ok) return reply.code(401).send({ error: 'wrong username or password' });
     const agent = agentUri(name);
-    return reply.send({ agent, token: mintToken(agent) });
+    return reply.send({ agent, token: mintToken(agent, name) });
+  });
+
+  // Change password. Bumps the account epoch, which invalidates every bearer
+  // issued before now — so this doubles as "sign out everywhere" and as the
+  // remediation path for a leaked credential.
+  fastify.post('/api/password', async (request, reply) => {
+    const body = request.body || {};
+    const name = String(body.username || '').toLowerCase();
+    if (!loginIpLimit(clientIp(request.raw)) || !loginUserLimit(name)) {
+      return reply.code(429).send({ error: 'too many attempts — wait a few minutes' });
+    }
+    const next = String(body.newPassword || '');
+    if (next.length < 8) return reply.code(400).send({ error: 'newPassword: at least 8 characters' });
+    const acct = hasAccount(name) ? accounts[name] : null;
+    const attempt = await hashPassword(String(body.password || ''), acct ? acct.salt : DUMMY_SALT);
+    const ok = !!acct && crypto.timingSafeEqual(Buffer.from(attempt), Buffer.from(acct.hash));
+    if (!ok) return reply.code(401).send({ error: 'wrong username or password' });
+    const salt = b64u(crypto.randomBytes(16));
+    acct.salt = salt;
+    acct.hash = await hashPassword(next, salt);
+    acct.epoch = (acct.epoch || 0) + 1; // revokes every existing token
+    saveAccounts();
+    const agent = agentUri(name);
+    return reply.send({ agent, token: mintToken(agent, name), revokedPreviousTokens: true });
   });
 
   fastify.get('/u/:name', async (request, reply) => {
     const name = String(request.params.name || '');
-    if (!accounts[name]) return reply.code(404).send({ error: 'no such agent' });
+    if (!hasAccount(name)) return reply.code(404).send({ error: 'no such agent' });
     return reply.send({
       '@context': { scry: 'https://scry.example/ns#' },
       '@id': agentUri(name),
@@ -149,6 +218,8 @@ export async function createSite({
       grantCredits,
       admins,
       accountsUi: true, // the register/login form instead of pod-bearer paste
+      ...(rateCapacity ? { rateCapacity } : {}),
+      ...(rateRefillPerSec ? { rateRefillPerSec } : {}),
       brand: 'scry',
       tagline: 'prediction markets on the news',
       ogImage: 'https://melvincarvalho.github.io/scry/assets/og.png',

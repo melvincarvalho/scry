@@ -3,11 +3,30 @@
 //
 //   node tools/seed.js [http://localhost:3490]
 
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
 const base = (process.argv[2] || 'http://localhost:3490').replace(/\/$/, '');
 // When seeding over loopback behind a proxy, the engine's CSRF guard checks
 // the PUBLIC origin — pass it as the second argument.
 const publicOrigin = (process.argv[3] || base).replace(/\/$/, '');
-const PASS = 'scry-newsdesk-2026';
+// The newsdesk account is the ORACLE for every question it creates — a
+// password committed to a public repo would hand any reader the power to
+// resolve all of them. Take it from the environment; otherwise generate one
+// and persist it beside the data (gitignored), so re-seeding still works and
+// the secret never enters git.
+const passFile = path.join(process.env.DATA || './data', 'newsdesk-password');
+function newsdeskPassword() {
+  if (process.env.NEWSDESK_PASSWORD) return process.env.NEWSDESK_PASSWORD;
+  try { return fs.readFileSync(passFile, 'utf8').trim(); } catch { /* mint below */ }
+  const pw = crypto.randomBytes(18).toString('base64url');
+  fs.mkdirSync(path.dirname(passFile), { recursive: true });
+  fs.writeFileSync(passFile, pw + '\n', { mode: 0o600 });
+  console.log(`newsdesk password generated → ${passFile} (keep it; it resolves the seeded questions)`);
+  return pw;
+}
+const PASS = newsdeskPassword();
 const days = (n) => new Date(Date.now() + n * 864e5).toISOString();
 
 const QUESTIONS = [

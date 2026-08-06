@@ -27,7 +27,9 @@ describe('scry site', () => {
 
   before(async () => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scry-'));
-    site = await createSite({ dataDir, grantCredits: 1000 });
+    // The suite deliberately hammers auth from one address; raise the engine's
+    // token bucket so its limiter doesn't mask the behaviour under test.
+    site = await createSite({ dataDir, grantCredits: 1000, rateCapacity: 5000, rateRefillPerSec: 500 });
     const { port } = await site.listen(0, '127.0.0.1');
     base = `http://127.0.0.1:${port}`;
   });
@@ -104,12 +106,42 @@ describe('scry site', () => {
     assert.strictEqual(stats.creditsInSystem, 2000, 'two grants, exactly — nothing minted or lost');
   });
 
-  it('registration is throttled per IP', async () => {
-    let last;
-    for (let i = 0; i < 12; i += 1) {
-      last = (await post(base, '/api/register', { username: `bulk${i}`, password: 'test-pass-1234' })).status;
-    }
-    assert.strictEqual(last, 429, 'burst registration hits the throttle');
+  // ---- round 1: the security review's findings, each pinned ----------------
+  it('inherited object keys are not accounts (constructor is a miss, not a hit)', async () => {
+    assert.strictEqual((await fetch(`${base}/u/constructor`)).status, 404, 'no phantom profile');
+    const reg = await post(base, '/api/register', { username: 'constructor', password: 'test-pass-1234' });
+    assert.strictEqual(reg.status, 201, 'a legitimate name is not permanently 409ed by the prototype');
+  });
+
+  it('an unknown username costs the same as a known one (no enumeration oracle)', async () => {
+    const time = async (username) => {
+      const t0 = process.hrtime.bigint();
+      await post(base, '/api/login', { username, password: 'definitely-wrong-pass' });
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    };
+    const known = await time('punter');
+    const unknown = await time('nobody-here-at-all');
+    // Both run scrypt; the ratio stays well inside noise (a fast-path miss
+    // would be ~20x quicker).
+    assert.ok(unknown > known / 4, `unknown ${unknown.toFixed(1)}ms vs known ${known.toFixed(1)}ms`);
+  });
+
+  it('changing the password revokes every existing token', async () => {
+    const u = await signup('rotator');
+    const before = await fetch(`${base}/api/whoami`, { headers: { authorization: `Bearer ${u.token}` } })
+      .then((r) => r.status).catch(() => 0);
+    const chg = await post(base, '/api/password', {
+      username: 'rotator', password: 'test-pass-1234', newPassword: 'a-brand-new-pass',
+    });
+    assert.strictEqual(chg.status, 200, await chg.clone().text());
+    const { token: fresh } = await chg.json();
+    // The OLD bearer can no longer buy a session; the fresh one can.
+    const oldSess = await post(base, '/api/session', {}, { authorization: `Bearer ${u.token}` });
+    assert.ok(oldSess.status >= 400, `old token revoked (was ${before})`);
+    const newSess = await post(base, '/api/session', {}, { authorization: `Bearer ${fresh}` });
+    assert.strictEqual(newSess.status, 200, 'the new token works');
+    assert.strictEqual((await post(base, '/api/login', { username: 'rotator', password: 'test-pass-1234' })).status, 401,
+      'the old password no longer signs in');
   });
 
   it('serves the trading UI at the site root, account form included', async () => {
@@ -119,4 +151,22 @@ describe('scry site', () => {
     assert.match(html, /do-acct-signin/, 'account-mode sign-in form');
     assert.match(html, /Top predictors/, 'leaderboard rail');
   });
+  // These two exhaust their limiters — they run last for that reason.
+  it('login is throttled per account, so guessing is not free', async () => {
+    let last;
+    for (let i = 0; i < 34; i += 1) {
+      last = (await post(base, '/api/login', { username: 'oracle', password: `guess-${i}-wrong` })).status;
+    }
+    assert.strictEqual(last, 429, 'password grinding hits the limiter');
+  });
+
+  // LAST on purpose: this test exhausts the registration limiter.
+  it('registration is throttled per IP', async () => {
+    let last;
+    for (let i = 0; i < 12; i += 1) {
+      last = (await post(base, '/api/register', { username: `bulk${i}`, password: 'test-pass-1234' })).status;
+    }
+    assert.strictEqual(last, 429, 'burst registration hits the throttle');
+  });
+
 });
