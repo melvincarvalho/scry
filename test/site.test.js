@@ -162,6 +162,31 @@ describe('scry site', () => {
     assert.match(html, /id="cats"/, 'topic chips');
     assert.match(html, /og:image/, 'link unfurls');
   });
+  it('survives a restart: accounts, ledger, positions and markets all persist', async () => {
+    const before = await (await get(base, '/api/stats')).json();
+    const myPos = await (await get(base, '/api/me', { cookie: users.punter.cookie })).json();
+    assert.ok(myPos.positions.length >= 1, 'there is a position to lose');
+
+    await site.close();
+    site = await createSite({ dataDir, grantCredits: 1000, rateCapacity: 5000, rateRefillPerSec: 500 });
+    const { port } = await site.listen(0, '127.0.0.1');
+    const base2 = `http://127.0.0.1:${port}`;
+
+    // The account still authenticates (host state) …
+    const login = await post(base2, '/api/login', { username: 'punter', password: 'test-pass-1234' });
+    assert.strictEqual(login.status, 200, 'accounts persisted');
+    // … the ledger is intact (engine journal + snapshot) …
+    const after = await (await get(base2, '/api/stats')).json();
+    assert.strictEqual(after.creditsInSystem, before.creditsInSystem, 'not a credit minted or lost');
+    // … and the positions survived with it.
+    const sess = await post(base2, '/api/session', {}, { authorization: `Bearer ${login.body?.token || (await login.json()).token}` });
+    const cookie = (sess.headers.get('set-cookie') || '').split(';')[0];
+    const mine = await (await get(base2, '/api/me', { cookie })).json();
+    assert.strictEqual(mine.positions.length, myPos.positions.length, 'positions survived');
+    assert.ok((await (await get(base2, '/api/markets')).json()).markets.length >= 1, 'markets survived');
+    base = base2; // subsequent tests run against the restarted node
+  });
+
   // These two exhaust their limiters — they run last for that reason.
   it('login is throttled per account, so guessing is not free', async () => {
     let last;

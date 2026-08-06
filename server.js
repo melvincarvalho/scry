@@ -73,7 +73,27 @@ export async function createSite({
     crypto.scrypt(password, salt, 32, (err, key) => (err ? reject(err) : resolve(b64u(key))));
   });
 
-  let origin = publicUrl ? String(publicUrl).replace(/\/$/, '') : null;
+  // ORIGIN IS LEDGER IDENTITY. Agent URIs (and therefore every balance,
+  // position and market row keyed by them) embed it, so a changed port or
+  // proxy would silently orphan every account: the same person returns as a
+  // new agent with a new grant, and their money is unreachable. So the
+  // origin is PERSISTED on first use and reused on every later boot; an
+  // explicit PUBLIC_URL still wins, but a mismatch is shouted about because
+  // it means the existing ledger is about to be addressed by a new name.
+  const originFile = path.join(dataDir, 'origin');
+  let persistedOrigin = null;
+  try { persistedOrigin = fs.readFileSync(originFile, 'utf8').trim() || null; } catch { /* first boot */ }
+  let origin = publicUrl ? String(publicUrl).replace(/\/$/, '') : persistedOrigin;
+  if (publicUrl && persistedOrigin && persistedOrigin !== origin) {
+    console.warn(`[scry] WARNING: this data directory was created under ${persistedOrigin} but PUBLIC_URL is `
+      + `${origin}. Existing accounts, balances and positions are keyed by the OLD origin and will look empty. `
+      + `Keep the old value, or migrate deliberately.`);
+  }
+  const rememberOrigin = () => {
+    if (!origin || persistedOrigin === origin) return;
+    try { fs.writeFileSync(originFile, origin + '\n'); persistedOrigin = origin; } catch { /* read-only fs */ }
+  };
+  rememberOrigin();
   const agentUri = (name) => `${origin}/u/${name}#me`;
 
   // Tokens carry the account's EPOCH so a compromised bearer can be revoked
@@ -267,6 +287,7 @@ export async function createSite({
       // One agent, one spelling (the solidpay lesson): the origin must match
       // how clients actually address the site, or minted agent URIs split.
       if (!origin) origin = `http://${host === '0.0.0.0' ? 'localhost' : host}:${actual}`;
+      rememberOrigin(); // pin it before the first account is ever minted
       return { port: actual, origin };
     },
     async close() {
