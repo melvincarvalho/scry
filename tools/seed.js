@@ -27,39 +27,85 @@ function newsdeskPassword() {
   return pw;
 }
 const PASS = newsdeskPassword();
-const days = (n) => new Date(Date.now() + n * 864e5).toISOString();
 
+const at = (iso) => new Date(`${iso}T12:00:00Z`).toISOString();
+
+// Ten questions grounded in the news as of 6 August 2026. Each description
+// carries the anchor figure it was written against, so a trader can see what
+// the market started from and an oracle knows what it promised to resolve.
+// Chosen for genuine uncertainty: a question everyone agrees on is a dead
+// market.
 const QUESTIONS = [
-  { title: 'Will Bitcoin close above $150,000 on 31 December 2026?', category: 'Crypto',
-    outcomes: ['Yes', 'No'], closesAt: days(140),
-    description: 'Resolves by the BTC/USD daily close on the last day of 2026 (major exchange consensus).' },
-  { title: 'Who wins the 2026 FIFA World Cup final?', category: 'Sport',
-    outcomes: ['A European side', 'A South American side', 'Anyone else'], closesAt: days(30),
-    description: 'Resolves by the confederation of the winning team.' },
-  { title: 'Will the ECB cut rates again before December 2026?', category: 'Economy',
-    outcomes: ['Yes', 'No'], closesAt: days(120),
-    description: 'Any reduction of the main refinancing rate announced before 1 Dec 2026.' },
-  { title: 'Will a major AI lab release a public model claiming AGI capability in 2026?', category: 'Tech',
-    outcomes: ['Yes', 'No'], closesAt: days(140),
-    description: 'Resolves YES if a top-5 lab formally claims AGI-level capability for a released system.' },
-  { title: 'Will the James Webb telescope announce a biosignature candidate this year?', category: 'Science',
-    outcomes: ['Yes', 'No'], closesAt: days(140),
-    description: 'A peer-reviewed candidate biosignature detection announced by the JWST programme in 2026.' },
-  { title: 'Will Nostr pass 10M monthly active pubkeys by year end?', category: 'Tech',
-    outcomes: ['Yes', 'No'], closesAt: days(140),
-    description: 'By the commonly-cited public relay statistics dashboards.' },
-  { title: 'Next UK general election: which party forms the government?', category: 'Politics',
-    outcomes: ['Labour', 'Conservative', 'Other / coalition'], closesAt: days(300),
-    description: 'Resolves when a new government is formed after the next general election.' },
-  { title: 'Will EUR/USD trade above 1.20 before November 2026?', category: 'Economy',
-    outcomes: ['Yes', 'No'], closesAt: days(85),
-    description: 'Any print above 1.2000 on a major venue before 1 Nov 2026.' },
-  { title: 'Will SpaceX Starship reach orbit and land both stages in one flight this year?', category: 'Science',
-    outcomes: ['Yes', 'No'], closesAt: days(140),
-    description: 'Both stages recovered (caught or soft-landed) from a single orbital flight in 2026.' },
-  { title: 'Champions League 2026-27: does an English club reach the final?', category: 'Sport',
-    outcomes: ['Yes', 'No'], closesAt: days(280),
-    description: 'At least one Premier League side in the final.' },
+  {
+    title: 'Which party controls the US Senate after the November midterms?',
+    category: 'Politics',
+    outcomes: ['Republicans hold', 'Democrats take control'],
+    closesAt: at('2026-11-03'),
+    description: 'Midterms are 3 Nov 2026; 35 seats are up, 22 of them Republican-held, so Democrats need a net gain of four. Forecasters disagree: Decision Desk HQ gives Republicans a 57% chance of holding (a 50-50 chamber with the VP breaking ties), while FiftyPlusOne gives Democrats 55% to reach 51+. Resolves on the majority once every race is called; a 50-50 tie counts as Republicans holding.',
+  },
+  {
+    title: 'Do Democrats win the US House in November?',
+    category: 'Politics',
+    outcomes: ['Yes', 'No'],
+    closesAt: at('2026-11-03'),
+    description: 'Forecast consensus favours Democrats — Decision Desk HQ has them at 61% (median 226-209), FiftyPlusOne at 85% (median 230 seats). Resolves YES if Democrats hold 218+ seats once every race is called.',
+  },
+  {
+    title: 'What does the Fed do at the 15-16 September FOMC meeting?',
+    category: 'Economy',
+    outcomes: ['Hike', 'Hold', 'Cut'],
+    closesAt: at('2026-09-15'),
+    description: 'The target range has been 3.50-3.75% since the July meeting, where the Fed held but THREE FOMC members dissented wanting a hike. Analysts call September finely balanced, hanging on the next two CPI prints and the Middle East. Resolves by the direction of the target range announced on 16 Sep.',
+  },
+  {
+    title: 'Is the Fed funds target range above 3.75% on 31 December 2026?',
+    category: 'Economy',
+    outcomes: ['Yes', 'No'],
+    closesAt: at('2026-12-30'),
+    description: 'The upper bound has sat at 3.75% since July 2026, with a hawkish minority pushing for more. Resolves YES if the upper bound of the target range exceeds 3.75% at year end.',
+  },
+  {
+    title: 'Does Bitcoin close above $75,000 on 31 December 2026?',
+    category: 'Crypto',
+    outcomes: ['Yes', 'No'],
+    closesAt: at('2026-12-30'),
+    description: 'BTC was about $64,137 on 5 Aug 2026, entering August below its major moving averages after a difficult first half. Analysts put $65-70k as the resistance zone to reclaim, with year-end scenarios spanning roughly $57k to $75k. Resolves by the BTC/USD daily close on 31 Dec (major-exchange consensus).',
+  },
+  {
+    title: 'Is OpenAI\'s Astra publicly available before 2027?',
+    category: 'Tech',
+    outcomes: ['Yes', 'No'],
+    closesAt: at('2026-12-30'),
+    description: 'OpenAI named Astra on 1 Aug 2026 — announced not with a launch but with ten solved open problems in mathematics and theoretical computer science, and with no date, no pricing, no model card and no ChatGPT availability. Since June 2026 frontier models also face up to 30 days of federal evaluation before release. Resolves YES if any member of the public can use Astra (ChatGPT or API) before 1 Jan 2027.',
+  },
+  {
+    title: 'Does OpenAI ship a model publicly named "GPT-6" in 2026?',
+    category: 'Tech',
+    outcomes: ['Yes', 'No'],
+    closesAt: at('2026-12-30'),
+    description: 'As of early August 2026 the flagship is GPT-5.6 (released 9 Jul 2026 in the Sol, Terra and Luna tiers) and OpenAI has not said whether its next family ships as GPT-6, as another GPT-5 point release, or as Astra alone. Resolves YES only if a model is publicly released under the name GPT-6 during 2026.',
+  },
+  {
+    title: 'Does Starship deploy payloads into orbit before 30 September?',
+    category: 'Science',
+    outcomes: ['Yes', 'No'],
+    closesAt: at('2026-09-29'),
+    description: 'Flight 13 splashed down softly in the Indian Ocean on 24 Jul 2026 after a scrubbed first attempt. Flight 14 is tentatively set for late August and is meant to deploy viable payloads into orbit — something Starship has never done. Resolves YES if a Starship flight successfully deploys payloads into orbit before 30 Sep 2026.',
+  },
+  {
+    title: 'Who wins the 2026-27 Premier League?',
+    category: 'Sport',
+    outcomes: ['Arsenal', 'Manchester City', 'Liverpool', 'Another club'],
+    closesAt: at('2027-05-23'),
+    description: 'The season starts 21 Aug 2026. Arsenal defend the title as 6/4 favourites under Arteta; Manchester City are 5/2 in their first post-Guardiola season; Liverpool are around +550 and Manchester United +600. Squawka\'s model: Arsenal 30.7%, City 27.2%. Resolves on the final table.',
+  },
+  {
+    title: 'Does Manchester United finish in the top four in 2026-27?',
+    category: 'Sport',
+    outcomes: ['Yes', 'No'],
+    closesAt: at('2027-05-23'),
+    description: 'United are fourth favourites for the title at around +600 going into the 2026-27 season. Resolves YES if they finish 1st-4th in the final Premier League table.',
+  },
 ];
 
 const post = (p, body, extra = {}) => fetch(base + p, {
