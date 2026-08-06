@@ -151,6 +151,9 @@ export async function createSite({
       accountsUi: true, // the register/login form instead of pod-bearer paste
       brand: 'scry',
       tagline: 'prediction markets on the news',
+      ogImage: 'https://melvincarvalho.github.io/scry/assets/og.png',
+      ogUrl: origin,
+      favicon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%235348C7'/%3E%3Crect x='12' y='36' width='10' height='18' rx='3' fill='%23fff' opacity='.45'/%3E%3Crect x='27' y='24' width='10' height='30' rx='3' fill='%23fff' opacity='.7'/%3E%3Crect x='42' y='10' width='10' height='44' rx='3' fill='%23fff'/%3E%3C/svg%3E",
       baseUrl: origin,
     },
     log: {
