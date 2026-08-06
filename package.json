@@ -1,0 +1,19 @@
+{
+  "name": "scry-markets",
+  "version": "0.0.1",
+  "description": "scry — prediction markets on the news. Hubdub's spirit, an LMSR brain: play-money markets, moving odds, leaderboards, user-submitted questions, a dispute-safe settlement state machine.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Melvin Carvalho <melvincarvalho@gmail.com> (https://melvincarvalho.com/#me)",
+  "repository": { "type": "git", "url": "https://github.com/melvincarvalho/scry.git" },
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node tools/seed.js",
+    "test": "node --test --test-concurrency=1 'test/*.test.js'"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "fastify": "^5.0.0",
+    "ws": "^8.18.0"
+  }
+}

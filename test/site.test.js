@@ -1,0 +1,122 @@
+// scry site integration — the standalone host wrapping the markets engine.
+//
+// The engine's 75-test suite lives with the engine (jss-plugins/markets);
+// these tests cover what SCRY adds: accounts (register/login/throttle),
+// agent URIs that dereference, the bearer→session exchange against host-
+// minted tokens, and a full news-market lifecycle driven through the host
+// (create with category → trade → leaderboard → conservation).
+
+import { describe, it, before, after } from 'node:test';
+import assert from 'node:assert';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createSite } from '../server.js';
+
+const jsonH = { 'content-type': 'application/json' };
+// Cookie'd (ambient) requests must look like a browser: the engine's CSRF
+// guard refuses them without an Origin/Sec-Fetch-Site same-origin signal.
+const post = (base, p, body, extra = {}) => fetch(base + p, {
+  method: 'POST', headers: { ...jsonH, origin: base, ...extra }, body: JSON.stringify(body),
+});
+const get = (base, p, extra = {}) => fetch(base + p, { headers: { origin: base, ...extra } });
+
+describe('scry site', () => {
+  let site; let base; let dataDir;
+  const users = {}; // name → {agent, token, cookie}
+
+  before(async () => {
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scry-'));
+    site = await createSite({ dataDir, grantCredits: 1000 });
+    const { port } = await site.listen(0, '127.0.0.1');
+    base = `http://127.0.0.1:${port}`;
+  });
+  after(async () => {
+    if (site) await site.close();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  async function signup(name) {
+    const reg = await post(base, '/api/register', { username: name, password: 'test-pass-1234' });
+    assert.strictEqual(reg.status, 201, await reg.clone().text());
+    const { agent, token } = await reg.json();
+    const sess = await post(base, '/api/session', {}, { authorization: `Bearer ${token}` });
+    assert.strictEqual(sess.status, 200, await sess.clone().text());
+    const cookie = (sess.headers.get('set-cookie') || '').split(';')[0];
+    assert.ok(cookie, 'session sets an HttpOnly cookie');
+    users[name] = { agent, token, cookie };
+    return users[name];
+  }
+
+  it('registers accounts; the agent URI dereferences', async () => {
+    const oracle = await signup('oracle');
+    assert.strictEqual(oracle.agent, `${base}/u/oracle#me`);
+    const prof = await (await fetch(`${base}/u/oracle`)).json();
+    assert.strictEqual(prof['@id'], oracle.agent);
+    assert.strictEqual((await post(base, '/api/register', { username: 'oracle', password: 'test-pass-1234' })).status, 409);
+    assert.strictEqual((await post(base, '/api/login', { username: 'oracle', password: 'wrong-pass-1' })).status, 401);
+  });
+
+  it('a session grants the 1,000 paper credits', async () => {
+    const me = await (await get(base, '/api/me', { cookie: users.oracle.cookie })).json();
+    assert.strictEqual(me.balance, 1000);
+  });
+
+  it('creates a categorized news market and trades it', async () => {
+    await signup('punter');
+    const closesAt = new Date(Date.now() + 7 * 864e5).toISOString();
+    const create = await post(base, '/api/markets', {
+      title: 'Will it rain on the parade?', category: 'News',
+      outcomes: ['Yes', 'No'], closesAt, b: 40,
+    }, { cookie: users.oracle.cookie });
+    assert.ok([200, 201].includes(create.status), await create.clone().text());
+    const market = (await create.json()).market || (await (await fetch(`${base}/api/markets?category=news`)).json()).markets[0];
+    assert.ok(market.id, 'market created');
+    assert.strictEqual(market.category, 'News');
+
+    // the oracle may NOT trade its own market; the punter may
+    const own = await post(base, `/api/markets/${market.id}/trade`,
+      { side: 'buy', outcome: 0, spend: 10 }, { cookie: users.oracle.cookie });
+    assert.ok(own.status >= 400, 'creator/oracle trading own market is refused');
+    const quote = await (await get(base, `/api/markets/${market.id}/quote?side=buy&outcome=0&spend=10`, { cookie: users.punter.cookie })).json();
+    assert.ok(quote.shares > 0, `quote works: ${JSON.stringify(quote)}`);
+    const trade = await post(base, `/api/markets/${market.id}/trade`,
+      { side: 'buy', outcome: 0, spend: 10 }, { cookie: users.punter.cookie });
+    assert.strictEqual(trade.status, 200, await trade.clone().text());
+    const me = await (await get(base, '/api/me', { cookie: users.punter.cookie })).json();
+    assert.ok(me.balance < 1000, 'stake left the balance');
+    assert.ok(me.positions.length >= 1, 'position recorded');
+  });
+
+  it('leaderboard: signed-in only, pseudonymized rivals, you are you', async () => {
+    assert.strictEqual((await fetch(`${base}/api/leaderboard`)).status, 401, 'anonymous refused');
+    const board = await (await get(base, '/api/leaderboard', { cookie: users.punter.cookie })).json();
+    assert.ok(board.leaderboard.length >= 2);
+    const mine = board.leaderboard.find((r) => r.you);
+    assert.ok(mine, 'your own row is identified');
+    for (const row of board.leaderboard) {
+      if (!row.you) assert.match(row.agent, /^anon-/, 'rivals are pseudonyms, not identities');
+    }
+  });
+
+  it('conservation holds through everything', async () => {
+    const stats = await (await fetch(`${base}/api/stats`)).json();
+    assert.strictEqual(stats.creditsInSystem, 2000, 'two grants, exactly — nothing minted or lost');
+  });
+
+  it('registration is throttled per IP', async () => {
+    let last;
+    for (let i = 0; i < 12; i += 1) {
+      last = (await post(base, '/api/register', { username: `bulk${i}`, password: 'test-pass-1234' })).status;
+    }
+    assert.strictEqual(last, 429, 'burst registration hits the throttle');
+  });
+
+  it('serves the trading UI at the site root, account form included', async () => {
+    const res = await fetch(`${base}/`);
+    assert.strictEqual(res.status, 200);
+    const html = await res.text();
+    assert.match(html, /do-acct-signin/, 'account-mode sign-in form');
+    assert.match(html, /Top predictors/, 'leaderboard rail');
+  });
+});
