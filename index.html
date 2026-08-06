@@ -1,0 +1,190 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>scry — prediction markets on the news</title>
+<meta name="description" content="Scry the news: play-money prediction markets in the spirit of Hubdub, with an LMSR market maker, a journalled conservation-checked ledger, and dispute-safe settlement. Bet paper credits, watch odds move, climb the leaderboard, submit your own questions.">
+<link rel="canonical" href="https://melvincarvalho.github.io/scry/">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<meta name="theme-color" content="#5348C7">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="scry">
+<meta property="og:title" content="scry — prediction markets on the news">
+<meta property="og:description" content="Hubdub's spirit, an LMSR brain: bet paper credits on news questions, watch the odds move, climb the leaderboard, ask your own.">
+<meta property="og:url" content="https://melvincarvalho.github.io/scry/">
+<meta property="og:image" content="https://melvincarvalho.github.io/scry/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="scry — prediction markets on the news">
+<meta name="twitter:image" content="https://melvincarvalho.github.io/scry/assets/og.png">
+<style>
+:root{
+  --bg:#F4F4F8; --surface:#FFFFFF; --surface2:#FAFAFD; --ink:#1B1B2B;
+  --soft:#5C5C74; --faint:#8E8EA6; --line:#DDDDE8;
+  --acc:#5348C7; --acc-ink:#4238B2; --acc-soft:#E9E7FA;
+  --yes:#2563EB; --no:#C2410C; --other:#7C3AED; --up:#16803C;
+  --shadow:0 1px 2px rgba(27,27,43,.06),0 10px 30px rgba(27,27,43,.08);
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#131320; --surface:#1A1A2B; --surface2:#202033; --ink:#E9E9F2;
+  --soft:#A2A2BC; --faint:#6E6E8A; --line:#2C2C44;
+  --acc:#8B7FF7; --acc-ink:#A99FFF; --acc-soft:#272357;
+  --yes:#60A5FA; --no:#FB923C; --other:#A78BFA; --up:#4ADE80;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 34px rgba(0,0,0,.45);
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--acc)}
+.wrap{max-width:940px;margin:0 auto;padding:0 22px}
+header{padding:14px 0;border-bottom:1px solid var(--line)}
+header .wrap{display:flex;align-items:center;gap:14px}
+.brand{display:flex;align-items:center;gap:9px;font-weight:750;font-size:17px;letter-spacing:.02em;color:var(--ink);text-decoration:none}
+header nav{margin-left:auto;display:flex;gap:18px;font-size:14.5px}
+header nav a{color:var(--soft);text-decoration:none;font-weight:550}
+header nav a:hover{color:var(--acc)}
+
+.hero{padding:70px 0 56px;display:grid;gap:40px;align-items:center}
+@media(min-width:820px){.hero{grid-template-columns:1.1fr .9fr}}
+h1{font-size:clamp(34px,5.5vw,52px);line-height:1.05;letter-spacing:-.025em;margin:0 0 16px;text-wrap:balance}
+h1 .acc{color:var(--acc)}
+.hero p.sub{font-size:18px;color:var(--soft);margin:0 0 28px;max-width:34rem}
+.cta{display:flex;gap:12px;flex-wrap:wrap}
+.btn{display:inline-block;padding:12px 22px;border-radius:10px;font-weight:600;font-size:15.5px;text-decoration:none;border:1px solid var(--line)}
+.btn.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.ghost{color:var(--acc);background:var(--surface)}
+.btn.ghost:hover{border-color:var(--acc)}
+.hero .note{margin-top:18px;font-size:13px;color:var(--faint)}
+
+.mock{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:20px 22px}
+.mock .q{font-weight:650;font-size:15.5px;margin-bottom:4px}
+.mock .meta{font-family:var(--mono);font-size:11px;color:var(--faint);margin-bottom:14px}
+.mock .meta .open{color:var(--up);font-weight:700}
+.orow{display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin:10px 0 4px}
+.orow .pct{font-family:var(--mono)}
+.bar{height:8px;border-radius:99px;background:var(--line);overflow:hidden}
+.bar>i{display:block;height:100%;border-radius:99px;animation:settle 1.4s cubic-bezier(.2,.8,.2,1) both}
+@keyframes settle{from{width:8%}}
+.mock .foot{margin-top:16px;font-family:var(--mono);font-size:11px;color:var(--faint);display:flex;justify-content:space-between}
+@media(prefers-reduced-motion:reduce){*{animation:none!important}}
+
+section{padding:52px 0;border-top:1px solid var(--line)}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--acc);margin:0 0 10px}
+h2{font-size:26px;letter-spacing:-.02em;margin:0 0 12px;text-wrap:balance}
+p.lead{color:var(--soft);max-width:46rem;margin:0 0 26px}
+.cards{display:grid;gap:16px}
+@media(min-width:760px){.cards.c4{grid-template-columns:repeat(4,1fr)}.cards.c2{grid-template-columns:1fr 1fr}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:18px}
+.card h3{margin:0 0 8px;font-size:15.5px}
+.card p{margin:0;font-size:14px;color:var(--soft)}
+pre{background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:16px 18px;overflow-x:auto;font:13px/1.6 var(--mono);color:var(--ink);margin:0}
+pre .c{color:var(--faint)}
+.rules{margin:0;padding:0;list-style:none;display:grid;gap:10px}
+.rules li{display:flex;gap:12px;font-size:14.5px;color:var(--soft)}
+.rules li::before{content:"◆";color:var(--acc);flex:0 0 auto;font-size:11px;line-height:2}
+.rules b{color:var(--ink)}
+footer{border-top:1px solid var(--line);padding:32px 0 60px;font-size:14px;color:var(--faint)}
+footer .wrap{display:flex;gap:18px;flex-wrap:wrap}
+footer a{color:var(--soft)}
+</style></head><body>
+
+<header><div class="wrap">
+  <a class="brand" href="#">
+    <svg width="22" height="22" viewBox="0 0 20 20" aria-hidden="true">
+      <rect x="1" y="11" width="4.5" height="8" rx="1.5" fill="currentColor" opacity=".4"></rect>
+      <rect x="7.75" y="6" width="4.5" height="13" rx="1.5" fill="currentColor" opacity=".65"></rect>
+      <rect x="14.5" y="1" width="4.5" height="18" rx="1.5" fill="var(--acc)"></rect>
+    </svg>
+    scry
+  </a>
+  <nav>
+    <a href="#how">How it works</a>
+    <a href="#fair">Why it's fair</a>
+    <a href="#run">Run it</a>
+    <a href="https://github.com/melvincarvalho/scry">GitHub</a>
+  </nav>
+</div></header>
+
+<div class="hero wrap">
+  <div>
+    <h1>Scry the news.<br><span class="acc">Put credits on it.</span></h1>
+    <p class="sub">Play-money prediction markets on news questions — moving odds, a leaderboard,
+    and questions anyone can ask. The spirit of Hubdub (2008), rebuilt on Hanson's LMSR market
+    maker with a ledger that proves its own conservation.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/melvincarvalho/scry#quickstart">Run it</a>
+      <a class="btn ghost" href="https://github.com/melvincarvalho/scry">Source</a>
+    </div>
+    <div class="note">Paper credits only — nothing can be bought, sold or withdrawn. That's the point.</div>
+  </div>
+  <div class="mock" aria-hidden="true">
+    <div class="q">Next UK general election: which party forms the government?</div>
+    <div class="meta"><span class="open">OPEN</span> · Politics · closes in 299d · 214 bets · 3,120 traded</div>
+    <div class="orow"><span style="color:var(--yes)">■ Labour</span><span class="pct">44.2%</span></div>
+    <div class="bar"><i style="width:44.2%;background:var(--yes)"></i></div>
+    <div class="orow"><span style="color:var(--no)">■ Conservative</span><span class="pct">27.9%</span></div>
+    <div class="bar"><i style="width:27.9%;background:var(--no);animation-delay:.12s"></i></div>
+    <div class="orow"><span style="color:var(--other)">■ Other / coalition</span><span class="pct">27.9%</span></div>
+    <div class="bar"><i style="width:27.9%;background:var(--other);animation-delay:.24s"></i></div>
+    <div class="foot"><span>LMSR · b=40</span><span>you: 120 shares Labour</span></div>
+  </div>
+</div>
+
+<section id="how"><div class="wrap">
+  <p class="eyebrow">How it works</p>
+  <h2>Four moves, one front page</h2>
+  <div class="cards c4">
+    <div class="card"><h3>Bet</h3><p>1,000 free paper credits on sign-up. Stake-first trading:
+    pick an outcome, set your stake, see exactly what you get before you commit.</p></div>
+    <div class="card"><h3>Watch the odds</h3><p>Every bet moves the price — the odds <em>are</em>
+    the crowd's live forecast, streamed over WebSocket as they shift.</p></div>
+    <div class="card"><h3>Climb the board</h3><p>Settled markets pay winners; the leaderboard
+    ranks predictors. Rivals are pseudonymous — a rival, not a dossier.</p></div>
+    <div class="card"><h3>Ask a question</h3><p>Anyone can create a market. Creators escrow the
+    market maker's worst-case loss, so junk questions cost their author.</p></div>
+  </div>
+</div></section>
+
+<section id="fair"><div class="wrap">
+  <p class="eyebrow">Why it's fair</p>
+  <h2>Settlement is a state machine, not a trust fall</h2>
+  <p class="lead">The interesting part of any prediction market is what happens when a question
+  resolves — and who could cheat. scry's engine treats a unilateral oracle as the attack it is:</p>
+  <ul class="rules">
+    <li><b>Oracles can't trade their own markets</b> — and their settlement claim is capped at
+    their own escrow, so resolving dishonestly wins them nothing.</li>
+    <li><b>Any holder can lodge a bonded dispute</b>, parking the market for an operator:
+    uphold, re-resolve, or void.</li>
+    <li><b>Abandoned markets auto-void at a time-weighted average price</b> — funds are never
+    stuck, and a last-second price pump is a pure loss.</li>
+    <li><b>Conservation is asserted after every settlement</b>: credits in the system equal
+    credits granted, exactly. The books cannot drift.</li>
+  </ul>
+</div></section>
+
+<section id="run"><div class="wrap">
+  <p class="eyebrow">Run it</p>
+  <h2>One host file over a battle-tested engine</h2>
+  <div class="cards c2">
+    <div><pre><span class="c"># a scry of your own</span>
+git clone https://github.com/melvincarvalho/scry
+cd scry &amp;&amp; npm install
+node server.js          <span class="c"># → http://localhost:3490</span>
+node tools/seed.js      <span class="c"># a front page of news questions</span></pre></div>
+    <div class="card"><h3>The engine has its own home</h3>
+    <p>The LMSR market maker, journalled ledger, settlement state machine and trading UI are
+    vendored verbatim from <a href="https://github.com/JavaScriptSolidServer/plugins">jss-plugins/markets</a>,
+    where they carry a 75-test suite — and run unchanged as a
+    <a href="https://github.com/JavaScriptSolidServer/JavaScriptSolidServer">JavaScript Solid Server</a>
+    plugin. One engine, two hosts.</p></div>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  <span>scry · MIT</span>
+  <a href="https://github.com/melvincarvalho/scry">GitHub</a>
+  <a href="https://en.wikipedia.org/wiki/Hubdub">Hubdub (2008)</a>
+  <a href="https://mason.gmu.edu/~rhanson/mktscore.pdf">Hanson's LMSR</a>
+  <span style="margin-left:auto">the odds are the forecast</span>
+</div></footer>
+</body></html>
