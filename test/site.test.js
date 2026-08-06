@@ -144,12 +144,23 @@ describe('scry site', () => {
       'the old password no longer signs in');
   });
 
+  it('topic browse: facets are published and filter the list', async () => {
+    const { categories } = await (await get(base, '/api/categories')).json();
+    assert.ok(categories.some((c) => c.name === 'News'), `facets: ${JSON.stringify(categories)}`);
+    const hit = await (await get(base, '/api/markets?category=news')).json();
+    assert.ok(hit.markets.length >= 1, 'filtering by topic returns that topic');
+    const miss = await (await get(base, '/api/markets?category=nonexistent-topic')).json();
+    assert.strictEqual(miss.markets.length, 0, 'and only that topic');
+  });
+
   it('serves the trading UI at the site root, account form included', async () => {
     const res = await fetch(`${base}/`);
     assert.strictEqual(res.status, 200);
     const html = await res.text();
     assert.match(html, /do-acct-signin/, 'account-mode sign-in form');
     assert.match(html, /Top predictors/, 'leaderboard rail');
+    assert.match(html, /id="cats"/, 'topic chips');
+    assert.match(html, /og:image/, 'link unfurls');
   });
   // These two exhaust their limiters — they run last for that reason.
   it('login is throttled per account, so guessing is not free', async () => {
