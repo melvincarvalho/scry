@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node server.js",
     "seed": "node tools/seed.js",
-    "test": "node --test --test-concurrency=1 'test/*.test.js'"
+    "test": "node --test --test-concurrency=1 test/*.test.js"
   },
   "engines": { "node": ">=20" },
   "dependencies": {
