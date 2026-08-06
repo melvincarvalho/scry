@@ -144,6 +144,23 @@ describe('scry site', () => {
       'the old password no longer signs in');
   });
 
+  it('a shared market link unfurls as THAT market — via path and via query', async () => {
+    // A fragment never reaches a server, so #m/<id> could only ever unfurl
+    // as the generic site card. Both server-visible forms must carry the
+    // question and its live odds.
+    const { markets } = await (await get(base, '/api/markets')).json();
+    const m = markets[0];
+    for (const p of [`/m/${m.id}`, `/?m=${m.id}`]) {
+      const html = await (await get(base, p)).text();
+      assert.ok(html.includes(`content="${m.title}"`), `${p}: og:title is the question`);
+      assert.match(html, /og:description" content="[^"]*%/, `${p}: description carries live odds`);
+      assert.ok(html.includes(`/m/${m.id}"`), `${p}: og:url is the share form`);
+    }
+    // An unknown id degrades to the site card rather than 404ing a share.
+    const miss = await (await get(base, '/m/no-such-market')).text();
+    assert.match(miss, /og:title" content="scry/, 'unknown ids fall back to the site card');
+  });
+
   it('topic browse: facets are published and filter the list', async () => {
     const { categories } = await (await get(base, '/api/categories')).json();
     assert.ok(categories.some((c) => c.name === 'News'), `facets: ${JSON.stringify(categories)}`);
