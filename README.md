@@ -14,7 +14,13 @@ git clone https://github.com/melvincarvalho/scry
 cd scry && npm install
 node server.js          # → http://localhost:3490
 node tools/seed.js      # a newsdesk account + a front page of questions
+npm test                # 13 site tests
+node tools/soak.js      # parallel trades, then prove conservation
 ```
+
+The seed prints a generated **newsdesk password** into
+`<data>/newsdesk-password` (that account is the oracle for the seeded
+questions — keep it, or set `NEWSDESK_PASSWORD` yourself).
 
 Behind a proxy:
 
@@ -37,6 +43,17 @@ dispute** that parks the market for an operator (uphold / re-resolve /
 void); and a market whose oracle disappears **auto-voids at TWAP** — funds
 are never stuck. The leaderboard is signed-in-only and pseudonymized
 ("show a rival, not a dossier").
+
+## Operating it
+
+Accounts are throttled (registration per IP, sign-in per IP *and* per
+account), passwords are scrypt-hashed off the event loop, and
+`POST /api/password` rotates a password and **revokes every existing
+token**. The data directory is the whole state: the engine's journal +
+snapshot, the account file, and an `origin` marker — that last one pins
+ledger identity, because agent URIs embed the origin and a changed port
+would otherwise orphan every balance. Back up the data directory; that is
+the ledger.
 
 ## Architecture
 
